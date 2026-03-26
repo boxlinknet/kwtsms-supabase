@@ -1,0 +1,35 @@
+[project]
+id = ""
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+
+[db]
+port = 54322
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+
+[auth.sms]
+enable_signup = true
+enable_confirmations = true
+
+[auth.hook.send_sms]
+enabled = true
+uri = "http://host.docker.internal:54321/functions/v1/sms-auth-hook"
+secrets = "env(SEND_SMS_HOOK_SECRET)"
+
+[functions.send-sms]
+verify_jwt = true
+
+[functions.sms-auth-hook]
+verify_jwt = false
+
+[functions.sms-admin]
+verify_jwt = true
+
+[functions.sms-cron]
+verify_jwt = true
