@@ -1,6 +1,11 @@
 -- pg_cron scheduled jobs for queue processing and daily sync
 -- Related: send-sms Edge Function, sms-cron Edge Function
--- Note: pg_net and pg_cron extensions must be enabled on the Supabase project
+
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
+CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
+GRANT USAGE ON SCHEMA cron TO postgres;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA cron TO postgres;
 
 -- Process pending SMS queue every 30 seconds
 -- Calls the send-sms Edge Function via pg_net

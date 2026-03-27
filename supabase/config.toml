@@ -1,6 +1,3 @@
-[project]
-id = ""
-
 [api]
 enabled = true
 port = 54321
@@ -8,6 +5,9 @@ schemas = ["public"]
 
 [db]
 port = 54322
+
+[realtime]
+enabled = false
 
 [auth]
 enabled = true
