@@ -109,6 +109,12 @@ Deno.serve(async (req) => {
       if (body_en !== undefined) updates.body_en = body_en
       if (body_ar !== undefined) updates.body_ar = body_ar
 
+      // Verify template exists
+      const { data: existing } = await supabaseAdmin.from('sms_templates').select('id').eq('slug', slug).single()
+      if (!existing) {
+        return new Response(JSON.stringify({ error: `Template not found: ${slug}` }), { status: 404, headers })
+      }
+
       const { error: updateErr } = await supabaseAdmin.from('sms_templates').update(updates).eq('slug', slug)
       if (updateErr) {
         return new Response(JSON.stringify({ error: updateErr.message }), { status: 500, headers })
@@ -121,27 +127,16 @@ Deno.serve(async (req) => {
     // POST /templates/:slug/reset
     if (method === 'POST' && path.match(/^templates\/[^/]+\/reset$/)) {
       const slug = path.replace('templates/', '').replace('/reset', '')
-      const { error: resetErr } = await supabaseAdmin.rpc('reset_template', { p_slug: slug })
 
-      // Fallback: do it manually if RPC doesn't exist
-      if (resetErr) {
-        await supabaseAdmin
-          .from('sms_templates')
-          .update({
-            body_en: supabaseAdmin.rpc ? undefined : '',
-            body_ar: supabaseAdmin.rpc ? undefined : '',
-          })
-          .eq('slug', slug)
-
-        // Manual reset using raw SQL approach
-        const { data: tmpl } = await supabaseAdmin.from('sms_templates').select('default_body_en, default_body_ar').eq('slug', slug).single()
-        if (tmpl) {
-          await supabaseAdmin.from('sms_templates').update({
-            body_en: tmpl.default_body_en,
-            body_ar: tmpl.default_body_ar,
-          }).eq('slug', slug)
-        }
+      const { data: tmpl } = await supabaseAdmin.from('sms_templates').select('default_body_en, default_body_ar').eq('slug', slug).single()
+      if (!tmpl) {
+        return new Response(JSON.stringify({ error: `Template not found: ${slug}` }), { status: 404, headers })
       }
+
+      await supabaseAdmin.from('sms_templates').update({
+        body_en: tmpl.default_body_en,
+        body_ar: tmpl.default_body_ar,
+      }).eq('slug', slug)
 
       log(ctx, 'Template reset', { slug })
       return new Response(JSON.stringify({ result: 'OK' }), { status: 200, headers })

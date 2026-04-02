@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
       phone: data.user.phone,
       phone_normalized: phone,
       template_slug: 'auth_otp',
-      variables: { otp: data.sms.otp },
+      variables: { otp: '***' },
       message,
       language,
       sender_id: senderForMessage,

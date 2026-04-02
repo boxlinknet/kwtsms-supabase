@@ -111,16 +111,24 @@ Deno.serve(async (req) => {
     }
 
     // Expand admin recipients
+    // For admin-type rows, create separate queue rows per admin phone
+    // so each gets its own status, msg_id, and audit trail
     const expandedRows: Array<typeof pendingRows[0] & { target_phone: string }> = []
+
+    // Cache admin recipients (avoid repeated queries)
+    let cachedAdmins: Array<{ phone_normalized: string | null }> | null = null
 
     for (const row of uniqueRows) {
       if (row.recipient_type === 'admin') {
-        const { data: admins } = await supabaseAdmin
-          .from('sms_admin_recipients')
-          .select('phone_normalized')
-          .eq('is_active', true)
+        if (cachedAdmins === null) {
+          const { data: admins } = await supabaseAdmin
+            .from('sms_admin_recipients')
+            .select('phone_normalized')
+            .eq('is_active', true)
+          cachedAdmins = admins || []
+        }
 
-        if (!admins || admins.length === 0) {
+        if (cachedAdmins.length === 0) {
           await supabaseAdmin.from('sms_queue').update({
             status: 'failed',
             error_code: 'NO_ADMIN_RECIPIENTS',
@@ -130,9 +138,27 @@ Deno.serve(async (req) => {
           continue
         }
 
-        for (const admin of admins) {
-          if (admin.phone_normalized) {
-            expandedRows.push({ ...row, target_phone: admin.phone_normalized })
+        // First admin uses the original row
+        const validAdmins = cachedAdmins.filter(a => a.phone_normalized)
+        if (validAdmins.length > 0) {
+          expandedRows.push({ ...row, target_phone: validAdmins[0].phone_normalized! })
+        }
+
+        // Additional admins get new queue rows
+        for (let i = 1; i < validAdmins.length; i++) {
+          const { data: newRow } = await supabaseAdmin.from('sms_queue').insert({
+            phone: validAdmins[i].phone_normalized!,
+            phone_normalized: validAdmins[i].phone_normalized!,
+            message: row.message,
+            template_slug: row.template_slug,
+            variables: row.variables,
+            language: row.language,
+            sender_id: row.sender_id,
+            recipient_type: 'admin',
+            status: 'processing',
+          }).select('*').single()
+          if (newRow) {
+            expandedRows.push({ ...newRow, target_phone: validAdmins[i].phone_normalized! })
           }
         }
       } else {
