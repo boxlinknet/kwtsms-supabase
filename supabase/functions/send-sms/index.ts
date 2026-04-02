@@ -54,17 +54,13 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Zero balance' }), { status: 200 })
     }
 
-    // Fetch pending queue rows
-    const { data: pendingRows, error: queueErr } = await supabaseAdmin
-      .from('sms_queue')
-      .select('*')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true })
-      .limit(200)
+    // Atomically claim pending rows (prevents race condition with concurrent invocations)
+    const { data: pendingRows, error: claimErr } = await supabaseAdmin
+      .rpc('claim_pending_sms', { batch_size: 200 })
 
-    if (queueErr) {
-      logError(ctx, 'Failed to fetch queue', { error: queueErr.message })
-      return new Response(JSON.stringify({ error: 'Queue fetch failed' }), { status: 500 })
+    if (claimErr) {
+      logError(ctx, 'Failed to claim queue rows', { error: claimErr.message })
+      return new Response(JSON.stringify({ error: 'Queue claim failed' }), { status: 500 })
     }
 
     if (!pendingRows || pendingRows.length === 0) {
@@ -72,14 +68,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ processed: 0 }), { status: 200 })
     }
 
-    log(ctx, `Processing ${pendingRows.length} pending messages`)
-
-    // Mark as processing
-    const pendingIds = pendingRows.map(r => r.id)
-    await supabaseAdmin
-      .from('sms_queue')
-      .update({ status: 'processing' })
-      .in('id', pendingIds)
+    log(ctx, `Processing ${pendingRows.length} claimed messages`)
 
     // Deduplicate within batch (same phone_normalized + same message)
     const seen = new Set<string>()
@@ -146,7 +135,7 @@ Deno.serve(async (req) => {
 
         // Additional admins get new queue rows
         for (let i = 1; i < validAdmins.length; i++) {
-          const { data: newRow } = await supabaseAdmin.from('sms_queue').insert({
+          const { data: newRow, error: insertErr } = await supabaseAdmin.from('sms_queue').insert({
             phone: validAdmins[i].phone_normalized!,
             phone_normalized: validAdmins[i].phone_normalized!,
             message: row.message,
@@ -157,7 +146,9 @@ Deno.serve(async (req) => {
             recipient_type: 'admin',
             status: 'processing',
           }).select('*').single()
-          if (newRow) {
+          if (insertErr) {
+            logError(ctx, 'Failed to create admin expansion row', { error: insertErr.message })
+          } else if (newRow) {
             expandedRows.push({ ...newRow, target_phone: validAdmins[i].phone_normalized! })
           }
         }
@@ -235,6 +226,12 @@ Deno.serve(async (req) => {
             processed_at: new Date().toISOString(),
           }).eq('id', row.id)
           sent++
+
+          // Stop sending if balance hits zero
+          if (result['balance-after'] !== undefined && result['balance-after'] <= 0) {
+            log(ctx, 'Balance depleted mid-batch, stopping')
+            break
+          }
         } else {
           await supabaseAdmin.from('sms_queue').update({
             status: 'failed',

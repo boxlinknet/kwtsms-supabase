@@ -39,6 +39,8 @@ interface CoverageResult {
 
 export type { SendResult, BalanceResult, SenderIdResult, CoverageResult }
 
+const API_TIMEOUT_MS = 15_000
+
 async function apiCall<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
   debug('kwtsms-client', `API call to ${endpoint}`)
 
@@ -49,6 +51,7 @@ async function apiCall<T>(endpoint: string, body: Record<string, unknown>): Prom
       'Accept': 'application/json',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   })
 
   const data = await response.json() as T

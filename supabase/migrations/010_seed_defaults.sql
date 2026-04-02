@@ -3,7 +3,7 @@
 
 -- Insert default settings (single row)
 INSERT INTO public.sms_settings (id, sender_id, default_country_code, test_mode, gateway_enabled, debug_logging)
-VALUES (1, 'KWT-SMS', '965', true, false, true)
+VALUES (1, 'KWT-SMS', '965', true, false, false)
 ON CONFLICT (id) DO NOTHING;
 
 -- Insert default templates

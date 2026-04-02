@@ -5,7 +5,7 @@
 import { Webhook } from 'https://esm.sh/standardwebhooks@1.0.0'
 import { supabaseAdmin } from '../_shared/db.ts'
 import { sendSms } from '../_shared/kwtsms-client.ts'
-import { normalizePhone } from '../_shared/normalize.ts'
+import { normalizePhone, validatePhone } from '../_shared/normalize.ts'
 import { cleanMessage } from '../_shared/clean.ts'
 import { renderTemplate } from '../_shared/templates.ts'
 import { log, debug, error as logError, setDebugLogging } from '../_shared/logger.ts'
@@ -38,7 +38,16 @@ Deno.serve(async (req) => {
       )
     }
 
-    const base64Secret = hookSecret.replace('v1,whsec_', '')
+    // Validate secret format
+    if (!hookSecret.startsWith('v1,whsec_')) {
+      logError(ctx, 'Invalid hook secret format, expected v1,whsec_ prefix')
+      return new Response(
+        JSON.stringify({ error: { http_code: 500, message: 'Invalid hook secret format' } }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const base64Secret = hookSecret.slice('v1,whsec_'.length)
     const headers = Object.fromEntries(req.headers)
     const wh = new Webhook(base64Secret)
 
@@ -109,8 +118,17 @@ Deno.serve(async (req) => {
       message = `Your verification code is: ${data.sms.otp}`
     }
 
-    // Normalize phone and clean message
+    // Normalize and validate phone
     const phone = normalizePhone(data.user.phone, settings.default_country_code)
+    const phoneValidation = validatePhone(phone)
+    if (!phoneValidation.valid) {
+      logError(ctx, 'Phone validation failed', { error: phoneValidation.error })
+      return new Response(
+        JSON.stringify({ error: { http_code: 400, message: `Invalid phone: ${phoneValidation.error}` } }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
     message = cleanMessage(message)
 
     debug(ctx, 'Sending OTP', { phone: phone.slice(0, 3) + '****', language })
@@ -119,8 +137,8 @@ Deno.serve(async (req) => {
     const senderForMessage = settings.sender_id || 'KWT-SMS'
     const result = await sendSms(username, password, phone, message, senderForMessage, settings.test_mode)
 
-    // Log to sms_queue for audit trail
-    await supabaseAdmin.from('sms_queue').insert({
+    // Log to sms_queue for audit trail (OTP masked in variables)
+    const { error: insertErr } = await supabaseAdmin.from('sms_queue').insert({
       phone: data.user.phone,
       phone_normalized: phone,
       template_slug: 'auth_otp',
@@ -139,10 +157,14 @@ Deno.serve(async (req) => {
       processed_at: new Date().toISOString(),
     })
 
+    if (insertErr) {
+      logError(ctx, 'Failed to log OTP to queue', { error: insertErr.message })
+    }
+
     if (result.result !== 'OK') {
       logError(ctx, 'OTP send failed', { code: result.code, description: result.description })
       return new Response(
-        JSON.stringify({ error: { http_code: 500, message: `kwtSMS error: ${result.code} ${result.description}` } }),
+        JSON.stringify({ error: { http_code: 500, message: `kwtSMS error: ${result.code}` } }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       )
     }
@@ -155,7 +177,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     logError(ctx, 'Unhandled error', { error: (err as Error).message })
     return new Response(
-      JSON.stringify({ error: { http_code: 500, message: `Failed to send SMS: ${(err as Error).message}` } }),
+      JSON.stringify({ error: { http_code: 500, message: 'Failed to send SMS' } }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

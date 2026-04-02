@@ -6,7 +6,7 @@ export const DEFAULTS = {
   COUNTRY_CODE: '965',
   TEST_MODE: true,
   GATEWAY_ENABLED: false,
-  DEBUG_LOGGING: true,
+  DEBUG_LOGGING: false,
 } as const
 
 export const KWTSMS_API_BASE = 'https://www.kwtsms.com/API'

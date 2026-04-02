@@ -1,11 +1,18 @@
 // sms-admin: CRUD endpoints for settings, templates, logs, gateway management
-// All endpoints require a valid JWT with service_role or admin privileges
+// All endpoints require a valid JWT with service_role privileges
 // Related: _shared/kwtsms-client.ts, _shared/db.ts, _shared/cors.ts
 
 import { supabaseAdmin } from '../_shared/db.ts'
 import { corsHeaders, corsResponse } from '../_shared/cors.ts'
 import { getBalance, getSenderIds, getCoverage, sendSms } from '../_shared/kwtsms-client.ts'
+import { validatePhone, normalizePhone } from '../_shared/normalize.ts'
 import { log, error as logError, setDebugLogging } from '../_shared/logger.ts'
+
+function unauthorizedResponse(headers: Record<string, string>): Response {
+  return new Response(JSON.stringify({ error: 'Unauthorized: service_role required' }), { status: 401, headers })
+}
+
+const SLUG_PATTERN = /^[a-z0-9_]+$/
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return corsResponse()
@@ -18,6 +25,23 @@ Deno.serve(async (req) => {
   const headers = { ...corsHeaders, 'Content-Type': 'application/json' }
 
   try {
+    // Verify service_role authorization
+    const authHeader = req.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return unauthorizedResponse(headers)
+    }
+    const token = authHeader.replace('Bearer ', '')
+    // Decode JWT payload to check role (Supabase JWTs are standard base64url)
+    try {
+      const payloadB64 = token.split('.')[1]
+      const payload = JSON.parse(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/')))
+      if (payload.role !== 'service_role') {
+        return unauthorizedResponse(headers)
+      }
+    } catch {
+      return unauthorizedResponse(headers)
+    }
+
     // POST /login
     if (method === 'POST' && path === 'login') {
       const { username, password } = await req.json()
@@ -28,7 +52,7 @@ Deno.serve(async (req) => {
       // Test credentials with /balance/
       const balanceResult = await getBalance(username, password)
       if (balanceResult.result !== 'OK') {
-        return new Response(JSON.stringify({ error: 'Invalid credentials', code: balanceResult.code, description: balanceResult.description }), { status: 401, headers })
+        return new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401, headers })
       }
 
       // Fetch sender IDs and coverage
@@ -75,11 +99,20 @@ Deno.serve(async (req) => {
     // PUT /settings
     if (method === 'PUT' && path === 'settings') {
       const updates = await req.json()
-      // Only allow updating specific fields
+      // Only allow updating specific fields with type validation
       const allowed: Record<string, unknown> = {}
       const allowedKeys = ['sender_id', 'default_country_code', 'test_mode', 'gateway_enabled', 'debug_logging']
       for (const key of allowedKeys) {
-        if (key in updates) allowed[key] = updates[key]
+        if (key in updates) {
+          const val = updates[key]
+          // Type validation
+          if (key === 'sender_id' && (typeof val !== 'string' || val.length === 0 || val.length > 50)) continue
+          if (key === 'default_country_code' && (typeof val !== 'string' || !/^\d{1,4}$/.test(val))) continue
+          if (key === 'test_mode' && typeof val !== 'boolean') continue
+          if (key === 'gateway_enabled' && typeof val !== 'boolean') continue
+          if (key === 'debug_logging' && typeof val !== 'boolean') continue
+          allowed[key] = val
+        }
       }
 
       if (Object.keys(allowed).length === 0) {
@@ -104,10 +137,18 @@ Deno.serve(async (req) => {
     // PUT /templates/:slug
     if (method === 'PUT' && path.startsWith('templates/') && !path.includes('reset')) {
       const slug = path.replace('templates/', '')
+      if (!SLUG_PATTERN.test(slug)) {
+        return new Response(JSON.stringify({ error: 'Invalid slug format' }), { status: 400, headers })
+      }
+
       const { body_en, body_ar } = await req.json()
       const updates: Record<string, string> = {}
       if (body_en !== undefined) updates.body_en = body_en
       if (body_ar !== undefined) updates.body_ar = body_ar
+
+      if (Object.keys(updates).length === 0) {
+        return new Response(JSON.stringify({ error: 'No fields to update' }), { status: 400, headers })
+      }
 
       // Verify template exists
       const { data: existing } = await supabaseAdmin.from('sms_templates').select('id').eq('slug', slug).single()
@@ -127,16 +168,23 @@ Deno.serve(async (req) => {
     // POST /templates/:slug/reset
     if (method === 'POST' && path.match(/^templates\/[^/]+\/reset$/)) {
       const slug = path.replace('templates/', '').replace('/reset', '')
+      if (!SLUG_PATTERN.test(slug)) {
+        return new Response(JSON.stringify({ error: 'Invalid slug format' }), { status: 400, headers })
+      }
 
       const { data: tmpl } = await supabaseAdmin.from('sms_templates').select('default_body_en, default_body_ar').eq('slug', slug).single()
       if (!tmpl) {
         return new Response(JSON.stringify({ error: `Template not found: ${slug}` }), { status: 404, headers })
       }
 
-      await supabaseAdmin.from('sms_templates').update({
+      const { error: resetErr } = await supabaseAdmin.from('sms_templates').update({
         body_en: tmpl.default_body_en,
         body_ar: tmpl.default_body_ar,
       }).eq('slug', slug)
+
+      if (resetErr) {
+        return new Response(JSON.stringify({ error: resetErr.message }), { status: 500, headers })
+      }
 
       log(ctx, 'Template reset', { slug })
       return new Response(JSON.stringify({ result: 'OK' }), { status: 200, headers })
@@ -145,22 +193,32 @@ Deno.serve(async (req) => {
     // POST /templates/reset (reset ALL)
     if (method === 'POST' && path === 'templates/reset') {
       const { data: templates } = await supabaseAdmin.from('sms_templates').select('slug, default_body_en, default_body_ar')
+      let resetCount = 0
+      const errors: string[] = []
       if (templates) {
         for (const tmpl of templates) {
-          await supabaseAdmin.from('sms_templates').update({
+          const { error: resetErr } = await supabaseAdmin.from('sms_templates').update({
             body_en: tmpl.default_body_en,
             body_ar: tmpl.default_body_ar,
           }).eq('slug', tmpl.slug)
+          if (resetErr) {
+            errors.push(`${tmpl.slug}: ${resetErr.message}`)
+          } else {
+            resetCount++
+          }
         }
       }
-      log(ctx, 'All templates reset to defaults')
-      return new Response(JSON.stringify({ result: 'OK' }), { status: 200, headers })
+      log(ctx, 'All templates reset to defaults', { resetCount, errors: errors.length })
+      if (errors.length > 0) {
+        return new Response(JSON.stringify({ result: 'PARTIAL', resetCount, errors }), { status: 207, headers })
+      }
+      return new Response(JSON.stringify({ result: 'OK', resetCount }), { status: 200, headers })
     }
 
     // GET /logs
     if (method === 'GET' && path === 'logs') {
-      const page = parseInt(url.searchParams.get('page') || '1')
-      const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100)
+      const page = Math.max(1, parseInt(url.searchParams.get('page') || '1') || 1)
+      const limit = Math.min(Math.max(1, parseInt(url.searchParams.get('limit') || '50') || 50), 100)
       const offset = (page - 1) * limit
 
       const { data: logs, count } = await supabaseAdmin
@@ -234,11 +292,18 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Credentials not configured' }), { status: 400, headers })
       }
 
+      // Normalize and validate phone
+      const normalized = normalizePhone(phone, settings.default_country_code)
+      const validation = validatePhone(normalized)
+      if (!validation.valid) {
+        return new Response(JSON.stringify({ error: `Invalid phone: ${validation.error}` }), { status: 400, headers })
+      }
+
       const testMessage = message || 'kwtSMS gateway test message'
       const result = await sendSms(
         settings.kwtsms_username,
         settings.kwtsms_password,
-        phone,
+        normalized,
         testMessage,
         settings.sender_id || 'KWT-SMS',
         settings.test_mode
@@ -252,6 +317,6 @@ Deno.serve(async (req) => {
 
   } catch (err) {
     logError(ctx, 'Unhandled error', { error: (err as Error).message })
-    return new Response(JSON.stringify({ error: (err as Error).message }), { status: 500, headers })
+    return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500, headers })
   }
 })
