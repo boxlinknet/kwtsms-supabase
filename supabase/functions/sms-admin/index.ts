@@ -294,9 +294,12 @@ Deno.serve(async (req) => {
 
       // Normalize and validate phone
       const normalized = normalizePhone(phone, settings.default_country_code)
+      if (!normalized || normalized.length < 8) {
+        return new Response(JSON.stringify({ error: 'Invalid phone number' }), { status: 400, headers })
+      }
       const validation = validatePhone(normalized)
       if (!validation.valid) {
-        return new Response(JSON.stringify({ error: `Invalid phone: ${validation.error}` }), { status: 400, headers })
+        return new Response(JSON.stringify({ error: 'Invalid phone number' }), { status: 400, headers })
       }
 
       const testMessage = message || 'kwtSMS gateway test message'

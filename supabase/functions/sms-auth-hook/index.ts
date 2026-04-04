@@ -120,11 +120,18 @@ Deno.serve(async (req) => {
 
     // Normalize and validate phone
     const phone = normalizePhone(data.user.phone, settings.default_country_code)
+    if (!phone || phone.length < 8) {
+      logError(ctx, 'Phone empty or too short after normalization')
+      return new Response(
+        JSON.stringify({ error: { http_code: 400, message: 'Invalid phone number' } }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
     const phoneValidation = validatePhone(phone)
     if (!phoneValidation.valid) {
       logError(ctx, 'Phone validation failed', { error: phoneValidation.error })
       return new Response(
-        JSON.stringify({ error: { http_code: 400, message: `Invalid phone: ${phoneValidation.error}` } }),
+        JSON.stringify({ error: { http_code: 400, message: 'Invalid phone number' } }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       )
     }

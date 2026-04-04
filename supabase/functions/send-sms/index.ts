@@ -163,8 +163,8 @@ Deno.serve(async (req) => {
 
     for (const row of expandedRows) {
       const phone = row.target_phone
-      if (!phone) {
-        await updateQueueRow(row.id, 'failed', 'INVALID_PHONE', 'Phone normalized to empty')
+      if (!phone || phone.length < 8) {
+        await updateQueueRow(row.id, 'failed', 'INVALID_PHONE', 'Invalid phone number')
         failed++
         continue
       }
