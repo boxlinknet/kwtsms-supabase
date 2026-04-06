@@ -494,7 +494,41 @@ export const HTML = `<!DOCTYPE html>
         </div>
       </div>
     </div>
-    <div id="page-logs" class="page"><p class="empty">Loading...</p></div>
+    <div id="page-logs" class="page">
+      <div class="page-header">
+        <h3>SMS Logs</h3>
+        <div class="btn-group">
+          <button class="btn-secondary" onclick="exportCsv()">Export CSV</button>
+          <button class="btn-danger" onclick="clearLogs()">Clear Logs</button>
+        </div>
+      </div>
+      <div class="filters-bar">
+        <select id="log-status" onchange="loadLogs(1)">
+          <option value="">All statuses</option>
+          <option value="sent">Sent</option>
+          <option value="failed">Failed</option>
+          <option value="skipped">Skipped</option>
+        </select>
+        <input type="text" id="log-phone" placeholder="Search phone..." onchange="loadLogs(1)">
+        <select id="log-template" onchange="loadLogs(1)">
+          <option value="">All templates</option>
+        </select>
+        <input type="date" id="log-from" onchange="loadLogs(1)">
+        <input type="date" id="log-to" onchange="loadLogs(1)">
+      </div>
+      <table>
+        <thead><tr>
+          <th>Date</th><th>Phone</th><th>Status</th><th>Message</th>
+          <th class="hide-mobile">Template</th><th class="hide-mobile">Msg ID</th>
+        </tr></thead>
+        <tbody id="logs-tbody"></tbody>
+      </table>
+      <div class="pagination">
+        <button class="btn-secondary" id="logs-prev" onclick="loadLogs(currentLogPage-1)">Prev</button>
+        <span id="logs-page-info"></span>
+        <button class="btn-secondary" id="logs-next" onclick="loadLogs(currentLogPage+1)">Next</button>
+      </div>
+    </div>
   </main>
   <div id="toast-container"></div>
 
@@ -848,7 +882,155 @@ export const HTML = `<!DOCTYPE html>
         loadTemplates();
       }
     }
-    function loadLogs(page) {}
+    var currentLogPage = 1;
+    var LOG_PAGE_SIZE = 50;
+    var templateFilterPopulated = false;
+
+    async function loadLogs(page) {
+      if (page < 1) return;
+      currentLogPage = page;
+
+      var query = 'logs?page=' + page + '&limit=' + LOG_PAGE_SIZE;
+      var status = document.getElementById('log-status').value;
+      if (status) query += '&status=' + status;
+
+      var data = await api('GET', query);
+      if (!data) return;
+
+      var tbody = document.getElementById('logs-tbody');
+      tbody.textContent = '';
+
+      if (!data.logs || data.logs.length === 0) {
+        var tr = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 6;
+        td.className = 'empty';
+        td.textContent = 'No SMS logs yet';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        document.getElementById('logs-page-info').textContent = '0 results';
+        document.getElementById('logs-prev').disabled = true;
+        document.getElementById('logs-next').disabled = true;
+        return;
+      }
+
+      for (var i = 0; i < data.logs.length; i++) {
+        var l = data.logs[i];
+        var tr = document.createElement('tr');
+
+        var tdDate = document.createElement('td');
+        tdDate.textContent = new Date(l.created_at).toLocaleString();
+        tr.appendChild(tdDate);
+
+        var tdPhone = document.createElement('td');
+        var phone = l.phone_normalized || l.phone || '';
+        tdPhone.textContent = phone.length > 6 ? phone.slice(0, 3) + '****' + phone.slice(-3) : phone;
+        tr.appendChild(tdPhone);
+
+        var tdStatus = document.createElement('td');
+        var badge = document.createElement('span');
+        var badgeClass = l.status === 'sent' ? 'badge-success' :
+          l.status === 'failed' ? 'badge-danger' :
+          l.status === 'skipped' ? 'badge-warning' : 'badge-pending';
+        badge.className = 'badge ' + badgeClass;
+        badge.textContent = l.status;
+        tdStatus.appendChild(badge);
+        tr.appendChild(tdStatus);
+
+        var tdMsg = document.createElement('td');
+        var msg = l.message || '';
+        tdMsg.textContent = msg.length > 60 ? msg.slice(0, 60) + '...' : msg;
+        tr.appendChild(tdMsg);
+
+        var tdTemplate = document.createElement('td');
+        tdTemplate.className = 'hide-mobile';
+        tdTemplate.textContent = l.template_slug || '-';
+        tr.appendChild(tdTemplate);
+
+        var tdMsgId = document.createElement('td');
+        tdMsgId.className = 'hide-mobile';
+        var codeEl = document.createElement('code');
+        codeEl.textContent = l.msg_id ? l.msg_id.slice(0, 12) : '-';
+        tdMsgId.appendChild(codeEl);
+        tr.appendChild(tdMsgId);
+
+        tbody.appendChild(tr);
+      }
+
+      var totalPages = Math.ceil((data.total || 0) / LOG_PAGE_SIZE);
+      document.getElementById('logs-page-info').textContent =
+        'Page ' + page + ' of ' + totalPages + ' (' + data.total + ' total)';
+      document.getElementById('logs-prev').disabled = page <= 1;
+      document.getElementById('logs-next').disabled = page >= totalPages;
+
+      if (!templateFilterPopulated) {
+        populateTemplateFilter();
+        templateFilterPopulated = true;
+      }
+    }
+
+    async function populateTemplateFilter() {
+      var templates = await api('GET', 'templates');
+      if (!Array.isArray(templates)) return;
+      var select = document.getElementById('log-template');
+      for (var i = 0; i < templates.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = templates[i].slug;
+        opt.textContent = templates[i].slug;
+        select.appendChild(opt);
+      }
+    }
+
+    async function exportCsv() {
+      showToast('Exporting...', 'info');
+      var allLogs = [];
+      var page = 1;
+      while (true) {
+        var query = 'logs?page=' + page + '&limit=100';
+        var status = document.getElementById('log-status').value;
+        if (status) query += '&status=' + status;
+        var data = await api('GET', query);
+        if (!data || !data.logs || data.logs.length === 0) break;
+        allLogs = allLogs.concat(data.logs);
+        if (allLogs.length >= (data.total || 0)) break;
+        page++;
+      }
+
+      var headers = ['date', 'phone', 'phone_normalized', 'status', 'message',
+        'template_slug', 'sender_id', 'msg_id', 'error_code', 'error_message',
+        'points_charged', 'balance_after'];
+      var csvRows = [headers.join(',')];
+      for (var i = 0; i < allLogs.length; i++) {
+        var l = allLogs[i];
+        var row = [];
+        for (var h = 0; h < headers.length; h++) {
+          var key = headers[h] === 'date' ? 'created_at' : headers[h];
+          var val = l[key];
+          if (val === null || val === undefined) val = '';
+          val = String(val).replace(/"/g, '""');
+          row.push('"' + val + '"');
+        }
+        csvRows.push(row.join(','));
+      }
+
+      var blob = new Blob([csvRows.join(String.fromCharCode(10))], { type: 'text/csv' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'sms-logs-' + new Date().toISOString().slice(0, 10) + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('Exported ' + allLogs.length + ' rows', 'success');
+    }
+
+    async function clearLogs() {
+      if (!confirm('Delete ALL logs? This cannot be undone.')) return;
+      var result = await api('DELETE', 'logs');
+      if (result && result.result === 'OK') {
+        showToast('Logs cleared', 'success');
+        loadLogs(1);
+      }
+    }
 
     // Tab click handlers
     document.querySelectorAll('.tab').forEach(function(tab) {
