@@ -33,3 +33,6 @@ verify_jwt = true
 
 [functions.sms-cron]
 verify_jwt = true
+
+[functions.sms-dashboard]
+verify_jwt = false
