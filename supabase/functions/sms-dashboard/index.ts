@@ -6,6 +6,8 @@ import { HTML } from './html.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+// JWT-format key for Edge Function auth (sb_secret_ format doesn't work with verify_jwt)
+const SERVICE_ROLE_JWT = Deno.env.get('SERVICE_ROLE_JWT') || SERVICE_ROLE_KEY
 
 Deno.serve(async (req) => {
   const url = new URL(req.url)
@@ -34,8 +36,10 @@ Deno.serve(async (req) => {
 })
 
 async function handleApiProxy(req: Request, apiPath: string, search: string): Promise<Response> {
+  const isRestApi = apiPath.startsWith('admin-recipients')
+  const authKey = isRestApi ? SERVICE_ROLE_KEY : SERVICE_ROLE_JWT
   const headers: Record<string, string> = {
-    'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
+    'Authorization': `Bearer ${authKey}`,
     'apikey': SERVICE_ROLE_KEY,
     'Content-Type': 'application/json',
   }
@@ -44,7 +48,7 @@ async function handleApiProxy(req: Request, apiPath: string, search: string): Pr
   const method = req.method
 
   // Admin recipients go to REST API
-  if (apiPath.startsWith('admin-recipients')) {
+  if (isRestApi) {
     const restBase = `${SUPABASE_URL}/rest/v1/sms_admin_recipients`
     if (apiPath === 'admin-recipients' && method === 'GET') {
       targetUrl = `${restBase}?select=*&order=created_at.desc`
