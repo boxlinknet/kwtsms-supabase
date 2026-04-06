@@ -470,7 +470,30 @@ export const HTML = `<!DOCTYPE html>
         <div id="test-result"></div>
       </section>
     </div>
-    <div id="page-templates" class="page"><p class="empty">Loading...</p></div>
+    <div id="page-templates" class="page">
+      <div class="page-header">
+        <h3>SMS Templates</h3>
+        <button class="btn-secondary" onclick="resetAllTemplates()">Reset All to Defaults</button>
+      </div>
+      <div id="templates-list"></div>
+      <div id="template-editor" class="card" style="display:none">
+        <h3>Edit Template: <span id="edit-slug"></span></h3>
+        <p id="edit-description" class="text-muted"></p>
+        <div class="form-group">
+          <label>Body (English)</label>
+          <textarea id="edit-body-en" rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Body (Arabic)</label>
+          <textarea id="edit-body-ar" rows="3" dir="rtl"></textarea>
+        </div>
+        <div class="btn-group">
+          <button class="btn-primary" onclick="saveTemplate()">Save</button>
+          <button class="btn-secondary" onclick="resetTemplate()">Reset to Default</button>
+          <button class="btn-secondary" onclick="closeEditor()">Cancel</button>
+        </div>
+      </div>
+    </div>
     <div id="page-logs" class="page"><p class="empty">Loading...</p></div>
   </main>
   <div id="toast-container"></div>
@@ -708,7 +731,123 @@ export const HTML = `<!DOCTYPE html>
       }
       el.appendChild(div);
     }
-    function loadTemplates() {}
+    var currentTemplateSlug = null;
+
+    async function loadTemplates() {
+      var templates = await api('GET', 'templates');
+      var list = document.getElementById('templates-list');
+      list.textContent = '';
+      if (!Array.isArray(templates) || templates.length === 0) {
+        var p = document.createElement('p');
+        p.className = 'empty';
+        p.textContent = 'No templates found';
+        list.appendChild(p);
+        return;
+      }
+
+      var table = document.createElement('table');
+      table.className = 'full-width';
+      var thead = document.createElement('thead');
+      var headerRow = document.createElement('tr');
+      var headers = ['Slug', 'Description', 'English', 'Arabic', 'Actions'];
+      for (var h = 0; h < headers.length; h++) {
+        var th = document.createElement('th');
+        th.textContent = headers[h];
+        if (headers[h] === 'Arabic') th.className = 'hide-mobile';
+        headerRow.appendChild(th);
+      }
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      var tbody = document.createElement('tbody');
+      for (var i = 0; i < templates.length; i++) {
+        var t = templates[i];
+        var tr = document.createElement('tr');
+
+        var tdSlug = document.createElement('td');
+        var code = document.createElement('code');
+        code.textContent = t.slug;
+        tdSlug.appendChild(code);
+        tr.appendChild(tdSlug);
+
+        var tdDesc = document.createElement('td');
+        tdDesc.textContent = t.description || '';
+        tr.appendChild(tdDesc);
+
+        var tdEn = document.createElement('td');
+        tdEn.className = 'truncate';
+        tdEn.textContent = t.body_en || '';
+        tr.appendChild(tdEn);
+
+        var tdAr = document.createElement('td');
+        tdAr.className = 'truncate hide-mobile';
+        tdAr.setAttribute('dir', 'rtl');
+        tdAr.textContent = t.body_ar || '';
+        tr.appendChild(tdAr);
+
+        var tdActions = document.createElement('td');
+        var editBtn = document.createElement('button');
+        editBtn.className = 'btn-primary btn-sm';
+        editBtn.textContent = 'Edit';
+        editBtn.setAttribute('data-index', String(i));
+        editBtn.addEventListener('click', (function(tmpl) {
+          return function() { editTemplate(tmpl); };
+        })(t));
+        tdActions.appendChild(editBtn);
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      list.appendChild(table);
+    }
+
+    function editTemplate(t) {
+      currentTemplateSlug = t.slug;
+      document.getElementById('edit-slug').textContent = t.slug;
+      document.getElementById('edit-description').textContent = t.description || '';
+      document.getElementById('edit-body-en').value = t.body_en || '';
+      document.getElementById('edit-body-ar').value = t.body_ar || '';
+      document.getElementById('template-editor').style.display = 'block';
+    }
+
+    function closeEditor() {
+      document.getElementById('template-editor').style.display = 'none';
+      currentTemplateSlug = null;
+    }
+
+    async function saveTemplate() {
+      if (!currentTemplateSlug) return;
+      var result = await api('PUT', 'templates/' + currentTemplateSlug, {
+        body_en: document.getElementById('edit-body-en').value,
+        body_ar: document.getElementById('edit-body-ar').value
+      });
+      if (result && result.result === 'OK') {
+        showToast('Template saved', 'success');
+        closeEditor();
+        loadTemplates();
+      }
+    }
+
+    async function resetTemplate() {
+      if (!currentTemplateSlug) return;
+      if (!confirm('Reset "' + currentTemplateSlug + '" to default?')) return;
+      var result = await api('POST', 'templates/' + currentTemplateSlug + '/reset');
+      if (result && result.result === 'OK') {
+        showToast('Template reset', 'success');
+        closeEditor();
+        loadTemplates();
+      }
+    }
+
+    async function resetAllTemplates() {
+      if (!confirm('Reset ALL templates to defaults?')) return;
+      var result = await api('POST', 'templates/reset');
+      if (result) {
+        showToast('All templates reset (' + result.resetCount + ')', 'success');
+        loadTemplates();
+      }
+    }
     function loadLogs(page) {}
 
     // Tab click handlers
