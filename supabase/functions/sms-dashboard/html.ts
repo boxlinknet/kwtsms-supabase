@@ -94,6 +94,7 @@ export const HTML = `<!DOCTYPE html>
       padding: 20px;
       margin-bottom: 16px;
       border: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
 
     .stats-row {
@@ -176,6 +177,7 @@ export const HTML = `<!DOCTYPE html>
     .badge-success { background: #E8F5E9; color: var(--success); }
     .badge-danger { background: #FFEBEE; color: var(--danger); }
     .badge-warning { background: #FFF8E1; color: var(--warning); }
+    .badge-pending { background: #f0f0f0; color: #888; }
 
     .toggle {
       position: relative;
@@ -260,6 +262,9 @@ export const HTML = `<!DOCTYPE html>
     td {
       padding: 10px;
       border-bottom: 1px solid var(--border);
+    }
+    tbody tr:nth-child(even) td {
+      background: rgba(0,0,0,0.02);
     }
     tr:hover td {
       background: var(--card-bg);
