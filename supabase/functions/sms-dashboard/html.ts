@@ -419,7 +419,57 @@ export const HTML = `<!DOCTYPE html>
       </div>
       <div id="dashboard-warnings"></div>
     </div>
-    <div id="page-settings" class="page"><p class="empty">Loading...</p></div>
+    <div id="page-settings" class="page">
+      <section class="card">
+        <h3>Gateway Configuration</h3>
+        <div class="form-group">
+          <label>Gateway Enabled</label>
+          <label class="toggle"><input type="checkbox" id="set-gateway-enabled"><span class="slider"></span></label>
+        </div>
+        <div class="form-group">
+          <label>Test Mode</label>
+          <label class="toggle"><input type="checkbox" id="set-test-mode"><span class="slider"></span></label>
+        </div>
+        <div class="form-group">
+          <label>Sender ID</label>
+          <input type="text" id="set-sender-id" maxlength="50">
+        </div>
+        <div class="form-group">
+          <label>Default Country Code</label>
+          <input type="text" id="set-country-code" maxlength="4">
+        </div>
+        <div class="form-group">
+          <label>Debug Logging</label>
+          <label class="toggle"><input type="checkbox" id="set-debug-logging"><span class="slider"></span></label>
+        </div>
+        <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
+      </section>
+      <section class="card">
+        <h3>Admin Recipients</h3>
+        <table>
+          <thead><tr><th>Phone</th><th>Label</th><th>Active</th><th>Actions</th></tr></thead>
+          <tbody id="admin-tbody"></tbody>
+        </table>
+        <div class="form-row">
+          <input type="text" id="admin-phone" placeholder="Phone number">
+          <input type="text" id="admin-label" placeholder="Label">
+          <button class="btn-primary" onclick="addAdmin()">Add</button>
+        </div>
+      </section>
+      <section class="card">
+        <h3>Send Test SMS</h3>
+        <div class="form-group">
+          <label>Phone Number</label>
+          <input type="text" id="test-phone" placeholder="96598765432">
+        </div>
+        <div class="form-group">
+          <label>Message</label>
+          <textarea id="test-message" rows="3">kwtSMS gateway test message</textarea>
+        </div>
+        <button class="btn-primary" onclick="sendTestSms()">Send Test</button>
+        <div id="test-result"></div>
+      </section>
+    </div>
     <div id="page-templates" class="page"><p class="empty">Loading...</p></div>
     <div id="page-logs" class="page"><p class="empty">Loading...</p></div>
   </main>
@@ -537,7 +587,127 @@ export const HTML = `<!DOCTYPE html>
       btn.disabled = false;
       btn.textContent = 'Sync Now';
     }
-    function loadSettings() {}
+    async function loadSettings() {
+      var settings = await api('GET', 'settings');
+      if (!settings) return;
+      document.getElementById('set-gateway-enabled').checked = settings.gateway_enabled;
+      document.getElementById('set-test-mode').checked = settings.test_mode;
+      document.getElementById('set-sender-id').value = settings.sender_id || '';
+      document.getElementById('set-country-code').value = settings.default_country_code || '';
+      document.getElementById('set-debug-logging').checked = settings.debug_logging;
+      loadAdminRecipients();
+    }
+
+    async function saveSettings() {
+      var result = await api('PUT', 'settings', {
+        gateway_enabled: document.getElementById('set-gateway-enabled').checked,
+        test_mode: document.getElementById('set-test-mode').checked,
+        sender_id: document.getElementById('set-sender-id').value,
+        default_country_code: document.getElementById('set-country-code').value,
+        debug_logging: document.getElementById('set-debug-logging').checked
+      });
+      if (result && result.result === 'OK') showToast('Settings saved', 'success');
+    }
+
+    async function loadAdminRecipients() {
+      var admins = await api('GET', 'admin-recipients');
+      var tbody = document.getElementById('admin-tbody');
+      tbody.textContent = '';
+      if (!Array.isArray(admins) || admins.length === 0) {
+        var tr = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'empty';
+        td.textContent = 'No admin recipients configured';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+      for (var i = 0; i < admins.length; i++) {
+        var a = admins[i];
+        var tr = document.createElement('tr');
+
+        var tdPhone = document.createElement('td');
+        tdPhone.textContent = a.phone_normalized || a.phone;
+        tr.appendChild(tdPhone);
+
+        var tdLabel = document.createElement('td');
+        tdLabel.textContent = a.label || '';
+        tr.appendChild(tdLabel);
+
+        var tdActive = document.createElement('td');
+        var toggleLabel = document.createElement('label');
+        toggleLabel.className = 'toggle';
+        var checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = a.is_active;
+        checkbox.setAttribute('data-id', a.id);
+        checkbox.addEventListener('change', function() {
+          toggleAdmin(this.getAttribute('data-id'), this.checked);
+        });
+        var slider = document.createElement('span');
+        slider.className = 'slider';
+        toggleLabel.appendChild(checkbox);
+        toggleLabel.appendChild(slider);
+        tdActive.appendChild(toggleLabel);
+        tr.appendChild(tdActive);
+
+        var tdActions = document.createElement('td');
+        var removeBtn = document.createElement('button');
+        removeBtn.className = 'btn-danger btn-sm';
+        removeBtn.textContent = 'Remove';
+        removeBtn.setAttribute('data-id', a.id);
+        removeBtn.addEventListener('click', function() {
+          removeAdmin(this.getAttribute('data-id'));
+        });
+        tdActions.appendChild(removeBtn);
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function addAdmin() {
+      var phone = document.getElementById('admin-phone').value.trim();
+      var label = document.getElementById('admin-label').value.trim();
+      if (!phone) { showToast('Phone number required', 'error'); return; }
+      var result = await api('POST', 'admin-recipients', { phone: phone, label: label, is_active: true });
+      if (result) {
+        document.getElementById('admin-phone').value = '';
+        document.getElementById('admin-label').value = '';
+        showToast('Recipient added', 'success');
+        loadAdminRecipients();
+      }
+    }
+
+    async function toggleAdmin(id, active) {
+      await api('PATCH', 'admin-recipients/' + id, { is_active: active });
+    }
+
+    async function removeAdmin(id) {
+      if (!confirm('Remove this admin recipient?')) return;
+      await api('DELETE', 'admin-recipients/' + id);
+      showToast('Recipient removed', 'success');
+      loadAdminRecipients();
+    }
+
+    async function sendTestSms() {
+      var phone = document.getElementById('test-phone').value.trim();
+      var message = document.getElementById('test-message').value.trim();
+      if (!phone) { showToast('Phone number required', 'error'); return; }
+      var result = await api('POST', 'test-gateway', { phone: phone, message: message });
+      var el = document.getElementById('test-result');
+      el.textContent = '';
+      var div = document.createElement('div');
+      if (result && result.result === 'OK') {
+        div.className = 'alert alert-success';
+        div.textContent = 'Sent! msg-id: ' + result['msg-id'];
+      } else {
+        div.className = 'alert alert-danger';
+        div.textContent = 'Failed: ' + (result ? (result.error || result.description || 'Unknown error') : 'No response');
+      }
+      el.appendChild(div);
+    }
     function loadTemplates() {}
     function loadLogs(page) {}
 
