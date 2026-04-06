@@ -387,7 +387,38 @@ export const HTML = `<!DOCTYPE html>
     <button class="tab" data-page="logs">Logs</button>
   </nav>
   <main>
-    <div id="page-dashboard" class="page active"><p class="empty">Loading...</p></div>
+    <div id="page-dashboard" class="page active">
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-balance">--</div>
+          <div class="stat-label">Balance</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-purchased">--</div>
+          <div class="stat-label">Purchased</div>
+        </div>
+        <div class="stat-card stat-success">
+          <div class="stat-value" id="stat-sent">--</div>
+          <div class="stat-label">Sent</div>
+        </div>
+        <div class="stat-card stat-danger">
+          <div class="stat-value" id="stat-failed">--</div>
+          <div class="stat-label">Failed</div>
+        </div>
+        <div class="stat-card stat-warning">
+          <div class="stat-value" id="stat-skipped">--</div>
+          <div class="stat-label">Skipped</div>
+        </div>
+      </div>
+      <div class="info-bar">
+        <span id="gw-status"></span>
+        <span id="test-mode-status"></span>
+        <span id="sender-id-display"></span>
+        <span id="sync-time"></span>
+        <button class="btn-primary" onclick="syncBalance()">Sync Now</button>
+      </div>
+      <div id="dashboard-warnings"></div>
+    </div>
     <div id="page-settings" class="page"><p class="empty">Loading...</p></div>
     <div id="page-templates" class="page"><p class="empty">Loading...</p></div>
     <div id="page-logs" class="page"><p class="empty">Loading...</p></div>
@@ -437,7 +468,75 @@ export const HTML = `<!DOCTYPE html>
     }
 
     // Stub loaders (replaced in later tasks)
-    function loadDashboard() {}
+    async function loadDashboard() {
+      var settings = await api('GET', 'settings');
+      if (!settings) return;
+
+      document.getElementById('stat-balance').textContent =
+        settings.cached_balance !== null ? settings.cached_balance.toLocaleString() : '--';
+      document.getElementById('stat-purchased').textContent =
+        settings.cached_purchased !== null ? settings.cached_purchased.toLocaleString() : '--';
+
+      var gwEl = document.getElementById('gw-status');
+      gwEl.textContent = '';
+      var gwBadge = document.createElement('span');
+      gwBadge.className = settings.gateway_enabled ? 'badge badge-success' : 'badge badge-danger';
+      gwBadge.textContent = settings.gateway_enabled ? 'Gateway Enabled' : 'Gateway Disabled';
+      gwEl.appendChild(gwBadge);
+
+      var tmEl = document.getElementById('test-mode-status');
+      tmEl.textContent = '';
+      var tmBadge = document.createElement('span');
+      tmBadge.className = settings.test_mode ? 'badge badge-warning' : 'badge badge-success';
+      tmBadge.textContent = settings.test_mode ? 'Test Mode ON' : 'Live Mode';
+      tmEl.appendChild(tmBadge);
+
+      document.getElementById('sender-id-display').textContent =
+        'Sender: ' + (settings.sender_id || 'Not set');
+      document.getElementById('sync-time').textContent =
+        settings.balance_synced_at
+          ? 'Last sync: ' + new Date(settings.balance_synced_at).toLocaleString()
+          : 'Never synced';
+
+      var warnings = document.getElementById('dashboard-warnings');
+      warnings.textContent = '';
+      if (!settings.gateway_enabled) {
+        var div = document.createElement('div');
+        div.className = 'alert alert-danger';
+        div.textContent = 'Gateway is disabled. Enable it in Settings.';
+        warnings.appendChild(div);
+      }
+      if (settings.cached_balance !== null && settings.cached_balance <= 0) {
+        var div2 = document.createElement('div');
+        div2.className = 'alert alert-danger';
+        div2.textContent = 'Zero balance. Recharge at kwtsms.com.';
+        warnings.appendChild(div2);
+      }
+
+      // Fetch log counts by status
+      var statuses = ['sent', 'failed', 'skipped'];
+      for (var i = 0; i < statuses.length; i++) {
+        var s = statuses[i];
+        var data = await api('GET', 'logs?limit=1&status=' + s);
+        if (data) {
+          document.getElementById('stat-' + s).textContent =
+            (data.total || 0).toLocaleString();
+        }
+      }
+    }
+
+    async function syncBalance() {
+      var btn = document.querySelector('#page-dashboard .btn-primary');
+      btn.disabled = true;
+      btn.textContent = 'Syncing...';
+      var result = await api('POST', 'balance/sync');
+      if (result && result.result === 'OK') {
+        showToast('Balance synced: ' + result.available, 'success');
+        loadDashboard();
+      }
+      btn.disabled = false;
+      btn.textContent = 'Sync Now';
+    }
     function loadSettings() {}
     function loadTemplates() {}
     function loadLogs(page) {}
