@@ -31,7 +31,11 @@ Deno.serve(async (req) => {
 
   // Serve the SPA HTML
   return new Response(HTML, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src https://www.kwtsms.com; connect-src 'self'",
+      'X-Content-Type-Options': 'nosniff',
+    },
   })
 })
 
@@ -76,12 +80,20 @@ async function handleApiProxy(req: Request, apiPath: string, search: string): Pr
     const respBody = await resp.text()
     return new Response(respBody, {
       status: resp.status,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
     })
   } catch (err) {
     return new Response(
       JSON.stringify({ error: 'Proxy error' }),
-      { status: 502, headers: { 'Content-Type': 'application/json' } },
+      { status: 502, headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      } },
     )
   }
 }

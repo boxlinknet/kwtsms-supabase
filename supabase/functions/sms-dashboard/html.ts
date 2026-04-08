@@ -542,11 +542,44 @@ export const HTML = `<!DOCTYPE html>
       if (loaders[name]) loaders[name]();
     }
 
+    // API base URL: auto-detect from current origin or use configured URL
+    var API_BASE = '';
+    (function() {
+      // If served from same Supabase project, use relative path
+      if (window.location.pathname.indexOf('/functions/v1/sms-dashboard') === 0) {
+        API_BASE = '/functions/v1/sms-dashboard/api/';
+      } else {
+        // Served externally (GitHub Pages, local file, etc.)
+        // Read from meta tag or prompt user
+        var meta = document.querySelector('meta[name="supabase-url"]');
+        if (meta && meta.content) {
+          API_BASE = meta.content + '/functions/v1/sms-dashboard/api/';
+        } else {
+          // Try localStorage
+          var saved = sessionStorage.getItem('supabase_url');
+          if (saved) {
+            API_BASE = saved + '/functions/v1/sms-dashboard/api/';
+          }
+        }
+      }
+    })();
+
+    function ensureApiBase() {
+      if (API_BASE) return true;
+      var url = prompt('Enter your Supabase project URL (e.g. https://xxxx.supabase.co):');
+      if (!url) return false;
+      url = url.replace(/\/+$/, '');
+      sessionStorage.setItem('supabase_url', url);
+      API_BASE = url + '/functions/v1/sms-dashboard/api/';
+      return true;
+    }
+
     async function api(method, path, body) {
+      if (!ensureApiBase()) return null;
       try {
         var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
         if (body) opts.body = JSON.stringify(body);
-        var resp = await fetch('/sms-dashboard/api/' + path, opts);
+        var resp = await fetch(API_BASE + path, opts);
         var data = await resp.json();
         if (!resp.ok) {
           showToast(data.error || 'Request failed', 'error');
