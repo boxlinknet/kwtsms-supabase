@@ -9,9 +9,9 @@ export const HTML = `<!DOCTYPE html>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Lato:wght@400;700&display=swap');
 
     :root {
-      --bg: #ffffff;
+      --bg: #f8f9fa;
       --text: #434345;
-      --card-bg: #f8f9fa;
+      --card-bg: #ffffff;
       --border: #e0e0e0;
       --primary: #FFA200;
       --accent: #79CCF2;
@@ -73,7 +73,6 @@ export const HTML = `<!DOCTYPE html>
     }
     .tab.active {
       color: var(--primary);
-      border-bottom-color: var(--primary);
       font-weight: bold;
     }
 
@@ -294,10 +293,30 @@ export const HTML = `<!DOCTYPE html>
     .info-bar {
       display: flex;
       flex-direction: row;
-      gap: 12px;
+      gap: 16px;
       align-items: center;
       flex-wrap: wrap;
-      padding: 16px 0;
+      padding: 14px 20px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      margin-top: 16px;
+    }
+    .info-bar .info-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .info-bar .info-label {
+      color: #888;
+      font-size: 12px;
+    }
+    .info-bar .info-separator {
+      width: 1px;
+      height: 20px;
+      background: var(--border);
     }
 
     .page-header {
@@ -411,11 +430,14 @@ export const HTML = `<!DOCTYPE html>
         </div>
       </div>
       <div class="info-bar">
-        <span id="gw-status"></span>
-        <span id="test-mode-status"></span>
-        <span id="sender-id-display"></span>
-        <span id="sync-time"></span>
-        <button class="btn-primary" onclick="syncBalance()">Sync Now</button>
+        <div class="info-item" id="gw-status"></div>
+        <div class="info-separator"></div>
+        <div class="info-item" id="test-mode-status"></div>
+        <div class="info-separator"></div>
+        <div class="info-item"><span class="info-label">Sender:</span> <span id="sender-id-display"></span></div>
+        <div class="info-separator"></div>
+        <div class="info-item"><span class="info-label">Synced:</span> <span id="sync-time"></span></div>
+        <button class="btn-primary btn-sm" onclick="syncBalance()">Sync Now</button>
       </div>
       <div id="dashboard-warnings"></div>
     </div>
@@ -432,11 +454,11 @@ export const HTML = `<!DOCTYPE html>
         </div>
         <div class="form-group">
           <label>Sender ID</label>
-          <input type="text" id="set-sender-id" maxlength="50">
+          <select id="set-sender-id"></select>
         </div>
         <div class="form-group">
           <label>Default Country Code</label>
-          <input type="text" id="set-country-code" maxlength="4">
+          <select id="set-country-code"></select>
         </div>
         <div class="form-group">
           <label>Debug Logging</label>
@@ -631,12 +653,11 @@ export const HTML = `<!DOCTYPE html>
       tmBadge.textContent = settings.test_mode ? 'Test Mode ON' : 'Live Mode';
       tmEl.appendChild(tmBadge);
 
-      document.getElementById('sender-id-display').textContent =
-        'Sender: ' + (settings.sender_id || 'Not set');
+      document.getElementById('sender-id-display').textContent = settings.sender_id || 'Not set';
       document.getElementById('sync-time').textContent =
         settings.balance_synced_at
-          ? 'Last sync: ' + new Date(settings.balance_synced_at).toLocaleString()
-          : 'Never synced';
+          ? new Date(settings.balance_synced_at).toLocaleString()
+          : 'Never';
 
       var warnings = document.getElementById('dashboard-warnings');
       warnings.textContent = '';
@@ -682,9 +703,40 @@ export const HTML = `<!DOCTYPE html>
       if (!settings) return;
       document.getElementById('set-gateway-enabled').checked = settings.gateway_enabled;
       document.getElementById('set-test-mode').checked = settings.test_mode;
-      document.getElementById('set-sender-id').value = settings.sender_id || '';
-      document.getElementById('set-country-code').value = settings.default_country_code || '';
       document.getElementById('set-debug-logging').checked = settings.debug_logging;
+
+      // Populate sender ID dropdown
+      var senderSelect = document.getElementById('set-sender-id');
+      senderSelect.textContent = '';
+      var senderIds = Array.isArray(settings.sender_ids) ? settings.sender_ids : [];
+      if (senderIds.length === 0 && settings.sender_id) senderIds = [settings.sender_id];
+      for (var i = 0; i < senderIds.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = senderIds[i];
+        opt.textContent = senderIds[i];
+        if (senderIds[i] === settings.sender_id) opt.selected = true;
+        senderSelect.appendChild(opt);
+      }
+
+      // Populate country code dropdown from coverage
+      var ccSelect = document.getElementById('set-country-code');
+      ccSelect.textContent = '';
+      var codes = [];
+      if (Array.isArray(settings.coverage)) {
+        codes = settings.coverage.map(function(c) { return String(c); });
+      }
+      if (codes.length === 0) codes = ['965'];
+      if (codes.indexOf(settings.default_country_code) === -1 && settings.default_country_code) {
+        codes.unshift(settings.default_country_code);
+      }
+      for (var j = 0; j < codes.length; j++) {
+        var opt2 = document.createElement('option');
+        opt2.value = codes[j];
+        opt2.textContent = '+' + codes[j];
+        if (codes[j] === settings.default_country_code) opt2.selected = true;
+        ccSelect.appendChild(opt2);
+      }
+
       loadAdminRecipients();
     }
 
