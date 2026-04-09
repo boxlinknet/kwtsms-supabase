@@ -604,15 +604,19 @@
     var authToken = sessionStorage.getItem('auth_token') || '';
     var authEmail = sessionStorage.getItem('auth_email') || '';
 
-    // API base URL: auto-detect
+    // API base URL: auto-detect from ?project= param, sessionStorage, or prompt
     var API_BASE = '';
     (function() {
       if (window.location.pathname.indexOf('/functions/v1/sms-dashboard') === 0) {
         API_BASE = '/functions/v1/sms-dashboard/api/';
       } else {
-        var meta = document.querySelector('meta[name="supabase-url"]');
-        if (meta && meta.content) {
-          API_BASE = meta.content + '/functions/v1/sms-dashboard/api/';
+        // Check ?project= URL parameter (set by Edge Function redirect)
+        var params = new URLSearchParams(window.location.search);
+        var projectUrl = params.get('project');
+        if (projectUrl) {
+          projectUrl = projectUrl.replace(/\/+$/, '');
+          sessionStorage.setItem('supabase_url', projectUrl);
+          API_BASE = projectUrl + '/functions/v1/sms-dashboard/api/';
         } else {
           var saved = sessionStorage.getItem('supabase_url');
           if (saved) API_BASE = saved + '/functions/v1/sms-dashboard/api/';
