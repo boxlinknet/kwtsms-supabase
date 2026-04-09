@@ -402,7 +402,7 @@ export const HTML = `<!DOCTYPE html>
       text-align: center;
       box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     }
-    #login-box img { margin: 0 auto 24px auto; display: block; max-width: 240px; height: auto; }
+    #login-box img { margin: 0 auto 24px auto; display: block; max-width: 280px; height: auto; }
     #login-box .form-group { text-align: left; }
     #login-box .btn-primary { width: 100%; padding: 10px; font-size: 15px; margin-top: 8px; }
     #login-error { color: var(--danger); font-size: 13px; margin-top: 12px; }
