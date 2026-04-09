@@ -486,7 +486,7 @@ export const HTML = `<!DOCTYPE html>
         </div>
         <div class="form-group">
           <label>Message</label>
-          <textarea id="test-message" rows="3">kwtSMS gateway test message</textarea>
+          <textarea id="test-message" rows="3"></textarea>
         </div>
         <button class="btn-primary" onclick="sendTestSms()">Send Test</button>
         <div id="test-result"></div>
@@ -738,6 +738,12 @@ export const HTML = `<!DOCTYPE html>
       }
 
       loadAdminRecipients();
+
+      // Prefill test message with timestamp
+      var testMsg = document.getElementById('test-message');
+      if (!testMsg.value) {
+        testMsg.value = 'kwtSMS test ' + new Date().toLocaleString();
+      }
     }
 
     async function saveSettings() {

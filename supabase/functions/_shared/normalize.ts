@@ -19,7 +19,12 @@ try {
 
 export function normalizePhone(phone: string, defaultCountryCode: string = '965'): string {
   if (normalizePhoneFn) {
-    return normalizePhoneFn(phone)
+    const result = normalizePhoneFn(phone)
+    // Package doesn't prepend country code for local numbers
+    if (result && /^\d+$/.test(result) && result.length <= 9 && result.length >= 7) {
+      return defaultCountryCode + result
+    }
+    return result
   }
   // Fallback: basic normalization
   let cleaned = phone
