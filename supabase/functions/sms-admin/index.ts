@@ -280,7 +280,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify(result), { status: 200, headers })
     }
 
-    // POST /test-gateway
+    // POST /test-gateway (supports comma-separated numbers)
     if (method === 'POST' && path === 'test-gateway') {
       const { phone, message } = await req.json()
       if (!phone) {
@@ -292,24 +292,36 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Credentials not configured' }), { status: 400, headers })
       }
 
-      const resp = await processAndSend({
-        phone,
-        message: message || 'kwtSMS gateway test message',
-        senderId: settings.sender_id || 'KWT-SMS',
-        username: settings.kwtsms_username,
-        password: settings.kwtsms_password,
-        testMode: settings.test_mode,
-        defaultCountryCode: settings.default_country_code,
-        coverage: settings.coverage,
-      })
+      const phones = phone.split(',').map((p: string) => p.trim()).filter((p: string) => p)
+      if (phones.length === 0) {
+        return new Response(JSON.stringify({ error: 'Phone number required' }), { status: 400, headers })
+      }
 
-      if (resp.ok) {
-        return new Response(JSON.stringify(resp.result), { status: 200, headers })
+      const results = []
+      for (const p of phones) {
+        const resp = await processAndSend({
+          phone: p,
+          message: message || 'kwtSMS gateway test message',
+          senderId: settings.sender_id || 'KWT-SMS',
+          username: settings.kwtsms_username,
+          password: settings.kwtsms_password,
+          testMode: settings.test_mode,
+          defaultCountryCode: settings.default_country_code,
+          coverage: settings.coverage,
+        })
+        results.push({ phone: resp.phone, ok: resp.ok, result: resp.result || null, error: resp.errorMessage || null })
       }
-      if (resp.result) {
-        return new Response(JSON.stringify(resp.result), { status: 200, headers })
+
+      // Single number: return simple response (backward compatible)
+      if (results.length === 1) {
+        const r = results[0]
+        if (r.ok && r.result) return new Response(JSON.stringify(r.result), { status: 200, headers })
+        if (r.result) return new Response(JSON.stringify(r.result), { status: 200, headers })
+        return new Response(JSON.stringify({ error: r.error }), { status: 400, headers })
       }
-      return new Response(JSON.stringify({ error: resp.errorMessage }), { status: 400, headers })
+
+      // Multiple numbers: return array
+      return new Response(JSON.stringify({ results }), { status: 200, headers })
     }
 
     // 404 for unknown routes

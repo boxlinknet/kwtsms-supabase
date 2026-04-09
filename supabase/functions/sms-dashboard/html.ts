@@ -526,7 +526,7 @@ export const HTML = `<!DOCTYPE html>
         <h3>Send Test SMS</h3>
         <div class="form-group">
           <label>Phone Number</label>
-          <input type="text" id="test-phone" placeholder="96598765432">
+          <input type="text" id="test-phone" placeholder="96598765432, 96566778899">
         </div>
         <div class="form-group">
           <label>Message</label>
@@ -960,16 +960,35 @@ export const HTML = `<!DOCTYPE html>
       var result = await api('POST', 'test-gateway', { phone: phone, message: message }, true);
       var el = document.getElementById('test-result');
       el.textContent = '';
+
+      if (!result) {
+        var d = document.createElement('div');
+        d.className = 'alert alert-danger';
+        d.textContent = 'Network error';
+        el.appendChild(d);
+        return;
+      }
+
+      // Multiple numbers response
+      if (result.results) {
+        for (var i = 0; i < result.results.length; i++) {
+          var r = result.results[i];
+          var div = document.createElement('div');
+          div.className = r.ok ? 'alert alert-success' : 'alert alert-danger';
+          div.textContent = r.phone + ': ' + (r.ok ? 'Sent' : (r.error || 'Failed'));
+          el.appendChild(div);
+        }
+        return;
+      }
+
+      // Single number response
       var div = document.createElement('div');
-      if (result && result.result === 'OK') {
+      if (result.result === 'OK') {
         div.className = 'alert alert-success';
         div.textContent = 'Sent! msg-id: ' + result['msg-id'];
-      } else if (result) {
-        div.className = 'alert alert-danger';
-        div.textContent = result.error || result.code + ': ' + result.description || 'Send failed';
       } else {
         div.className = 'alert alert-danger';
-        div.textContent = 'Network error';
+        div.textContent = result.error || (result.code + ': ' + result.description) || 'Send failed';
       }
       el.appendChild(div);
     }
