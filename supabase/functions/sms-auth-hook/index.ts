@@ -136,6 +136,19 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Check coverage
+    if (settings.coverage && Array.isArray(settings.coverage) && settings.coverage.length > 0) {
+      const coveragePrefixes = settings.coverage.map((c: unknown) => String(c))
+      const hasRoute = coveragePrefixes.some((prefix: string) => phone.startsWith(prefix))
+      if (!hasRoute) {
+        logError(ctx, 'No coverage for phone country', { phone: phone.slice(0, 3) + '****' })
+        return new Response(
+          JSON.stringify({ error: { http_code: 400, message: 'Phone country not supported' } }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
     message = cleanMessage(message)
 
     debug(ctx, 'Sending OTP', { phone: phone.slice(0, 3) + '****', language })

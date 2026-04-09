@@ -73,9 +73,9 @@ Deno.serve(async (req) => {
       const coverageResult = await getCoverage(settings.kwtsms_username, settings.kwtsms_password)
       if (coverageResult.result === 'OK') {
         await supabaseAdmin.from('sms_settings').update({
-          coverage: coverageResult.coverage,
+          coverage: coverageResult.prefixes || null,
         }).eq('id', 1)
-        results.coverage = 'synced'
+        results.coverage = coverageResult.prefixes
       } else {
         results.coverage = { error: coverageResult.code }
       }

@@ -596,7 +596,7 @@ export const HTML = `<!DOCTYPE html>
       return true;
     }
 
-    async function api(method, path, body) {
+    async function api(method, path, body, silent) {
       if (!ensureApiBase()) return null;
       try {
         var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
@@ -604,8 +604,9 @@ export const HTML = `<!DOCTYPE html>
         var resp = await fetch(API_BASE + path, opts);
         var data = await resp.json();
         if (!resp.ok) {
-          showToast(data.error || 'Request failed', 'error');
-          return null;
+          if (!silent) showToast(data.error || 'Request failed', 'error');
+          data._failed = true;
+          return data;
         }
         return data;
       } catch (err) {
@@ -843,16 +844,19 @@ export const HTML = `<!DOCTYPE html>
       var phone = document.getElementById('test-phone').value.trim();
       var message = document.getElementById('test-message').value.trim();
       if (!phone) { showToast('Phone number required', 'error'); return; }
-      var result = await api('POST', 'test-gateway', { phone: phone, message: message });
+      var result = await api('POST', 'test-gateway', { phone: phone, message: message }, true);
       var el = document.getElementById('test-result');
       el.textContent = '';
       var div = document.createElement('div');
       if (result && result.result === 'OK') {
         div.className = 'alert alert-success';
         div.textContent = 'Sent! msg-id: ' + result['msg-id'];
+      } else if (result) {
+        div.className = 'alert alert-danger';
+        div.textContent = result.error || result.code + ': ' + result.description || 'Send failed';
       } else {
         div.className = 'alert alert-danger';
-        div.textContent = 'Failed: ' + (result ? (result.error || result.description || 'Unknown error') : 'No response');
+        div.textContent = 'Network error';
       }
       el.appendChild(div);
     }

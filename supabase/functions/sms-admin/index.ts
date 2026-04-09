@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
         cached_balance: balanceResult.available,
         cached_purchased: balanceResult.purchased,
         sender_ids: senderResult.result === 'OK' ? senderResult.senderid : null,
-        coverage: coverageResult.result === 'OK' ? coverageResult.coverage : null,
+        coverage: coverageResult.result === 'OK' ? coverageResult.prefixes : null,
         balance_synced_at: new Date().toISOString(),
       }).eq('id', 1)
 
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
         balance: balanceResult.available,
         purchased: balanceResult.purchased,
         sender_ids: senderResult.result === 'OK' ? senderResult.senderid : [],
-        coverage: coverageResult.result === 'OK' ? coverageResult.coverage : [],
+        coverage: coverageResult.result === 'OK' ? coverageResult.prefixes : [],
       }), { status: 200, headers })
     }
 
@@ -300,6 +300,15 @@ Deno.serve(async (req) => {
       const validation = validatePhone(normalized)
       if (!validation.valid) {
         return new Response(JSON.stringify({ error: 'Invalid phone number' }), { status: 400, headers })
+      }
+
+      // Check coverage
+      if (settings.coverage && Array.isArray(settings.coverage) && settings.coverage.length > 0) {
+        const coveragePrefixes = settings.coverage.map((c: unknown) => String(c))
+        const hasRoute = coveragePrefixes.some((prefix: string) => normalized.startsWith(prefix))
+        if (!hasRoute) {
+          return new Response(JSON.stringify({ error: 'Phone country not supported. Check coverage in your kwtSMS account.' }), { status: 400, headers })
+        }
       }
 
       const testMessage = message || 'kwtSMS gateway test message'

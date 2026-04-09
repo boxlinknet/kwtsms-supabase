@@ -32,7 +32,7 @@ interface SenderIdResult {
 
 interface CoverageResult {
   result: string
-  coverage?: unknown
+  prefixes?: string[]
   code?: string
   description?: string
 }
