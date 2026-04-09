@@ -420,7 +420,7 @@ export const HTML = `<!DOCTYPE html>
 <body>
   <div id="login-screen">
     <div id="login-box">
-      <img src="https://www.kwtsms.com/images/kwtsms_logo_60.png" alt="kwtSMS" height="48">
+      <img src="https://www.kwtsms.com/images/kwtsms_logo_60.png" alt="kwtSMS">
       <div class="form-group">
         <label>Email</label>
         <input type="email" id="login-email" placeholder="admin@example.com">
