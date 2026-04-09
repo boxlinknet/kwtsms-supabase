@@ -3,9 +3,7 @@
 // Related: _shared/kwtsms-client.ts, _shared/normalize.ts, _shared/clean.ts
 
 import { supabaseAdmin } from '../_shared/db.ts'
-import { sendSms } from '../_shared/kwtsms-client.ts'
-import { validatePhone, normalizePhone } from '../_shared/normalize.ts'
-import { cleanMessage } from '../_shared/clean.ts'
+import { processAndSend } from '../_shared/send.ts'
 import { log, debug, error as logError, setDebugLogging } from '../_shared/logger.ts'
 
 Deno.serve(async (req) => {
@@ -157,94 +155,50 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Process each row
+    // Process each row via unified send pipeline
     let sent = 0
     let failed = 0
 
     for (const row of expandedRows) {
-      const phone = row.target_phone
-      if (!phone || phone.length < 8) {
-        await updateQueueRow(row.id, 'failed', 'INVALID_PHONE', 'Invalid phone number')
-        failed++
-        continue
-      }
-
-      // Full validation with kwtsms PHONE_RULES
-      const validation = validatePhone(phone)
-      if (!validation.valid) {
-        debug(ctx, 'Phone validation failed', { phone, error: validation.error })
-        await updateQueueRow(row.id, 'failed', 'INVALID_PHONE', validation.error || 'Phone validation failed')
-        failed++
-        continue
-      }
-
-      // Check coverage
-      if (settings.coverage) {
-        const coveragePrefixes = Array.isArray(settings.coverage)
-          ? settings.coverage.map((c: unknown) => String(c))
-          : []
-        if (coveragePrefixes.length > 0) {
-          const hasRoute = coveragePrefixes.some((prefix: string) => phone.startsWith(prefix))
-          if (!hasRoute) {
-            log(ctx, 'No coverage for country', { phone: phone.slice(0, 3) + '***' })
-            await updateQueueRow(row.id, 'skipped', 'NO_COVERAGE', `No route for prefix. Country not activated on kwtSMS account.`)
-            failed++
-            continue
-          }
-        }
-      }
-
-      // Clean message
-      const message = cleanMessage(row.message || '')
-      if (!message) {
-        await updateQueueRow(row.id, 'failed', 'EMPTY_MESSAGE', 'Message empty after cleaning')
-        failed++
-        continue
-      }
-
-      // Determine sender ID
       const senderForMessage = row.sender_id || settings.sender_id || 'KWT-SMS'
 
-      // Send via kwtSMS API
-      try {
-        const result = await sendSms(
-          settings.kwtsms_username,
-          settings.kwtsms_password,
-          phone,
-          message,
-          senderForMessage,
-          settings.test_mode
-        )
+      const resp = await processAndSend({
+        phone: row.target_phone || '',
+        message: row.message || '',
+        senderId: senderForMessage,
+        username: settings.kwtsms_username,
+        password: settings.kwtsms_password,
+        testMode: settings.test_mode,
+        defaultCountryCode: settings.default_country_code,
+        coverage: settings.coverage,
+        skipNormalize: true,
+      })
 
-        if (result.result === 'OK') {
-          await supabaseAdmin.from('sms_queue').update({
-            status: 'sent',
-            msg_id: result['msg-id'],
-            points_charged: result['points-charged'],
-            balance_after: result['balance-after'],
-            api_response: result,
-            processed_at: new Date().toISOString(),
-          }).eq('id', row.id)
-          sent++
+      if (resp.ok && resp.result) {
+        await supabaseAdmin.from('sms_queue').update({
+          status: 'sent',
+          msg_id: resp.result['msg-id'],
+          points_charged: resp.result['points-charged'],
+          balance_after: resp.result['balance-after'],
+          api_response: resp.result,
+          processed_at: new Date().toISOString(),
+        }).eq('id', row.id)
+        sent++
 
-          // Stop sending if balance hits zero
-          if (result['balance-after'] !== undefined && result['balance-after'] <= 0) {
-            log(ctx, 'Balance depleted mid-batch, stopping')
-            break
-          }
-        } else {
-          await supabaseAdmin.from('sms_queue').update({
-            status: 'failed',
-            error_code: result.code,
-            error_message: result.description,
-            api_response: result,
-            processed_at: new Date().toISOString(),
-          }).eq('id', row.id)
-          failed++
+        // Stop sending if balance hits zero
+        if (resp.result['balance-after'] !== undefined && resp.result['balance-after'] <= 0) {
+          log(ctx, 'Balance depleted mid-batch, stopping')
+          break
         }
-      } catch (err) {
-        logError(ctx, 'API call failed', { error: (err as Error).message })
-        await updateQueueRow(row.id, 'failed', 'API_ERROR', (err as Error).message)
+      } else {
+        const status = resp.errorCode === 'NO_COVERAGE' ? 'skipped' : 'failed'
+        await supabaseAdmin.from('sms_queue').update({
+          status,
+          error_code: resp.errorCode || resp.result?.code,
+          error_message: resp.errorMessage || resp.result?.description,
+          api_response: resp.result || null,
+          processed_at: new Date().toISOString(),
+        }).eq('id', row.id)
         failed++
       }
     }
@@ -257,11 +211,3 @@ Deno.serve(async (req) => {
   }
 })
 
-async function updateQueueRow(id: string, status: string, errorCode: string, errorMessage: string) {
-  await supabaseAdmin.from('sms_queue').update({
-    status,
-    error_code: errorCode,
-    error_message: errorMessage,
-    processed_at: new Date().toISOString(),
-  }).eq('id', id)
-}

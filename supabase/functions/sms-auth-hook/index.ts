@@ -4,9 +4,7 @@
 
 import { Webhook } from 'https://esm.sh/standardwebhooks@1.0.0'
 import { supabaseAdmin } from '../_shared/db.ts'
-import { sendSms } from '../_shared/kwtsms-client.ts'
-import { normalizePhone, validatePhone } from '../_shared/normalize.ts'
-import { cleanMessage } from '../_shared/clean.ts'
+import { processAndSend } from '../_shared/send.ts'
 import { renderTemplate } from '../_shared/templates.ts'
 import { log, debug, error as logError, setDebugLogging } from '../_shared/logger.ts'
 
@@ -118,62 +116,38 @@ Deno.serve(async (req) => {
       message = `Your verification code is: ${data.sms.otp}`
     }
 
-    // Normalize and validate phone
-    const phone = normalizePhone(data.user.phone, settings.default_country_code)
-    if (!phone || phone.length < 8) {
-      logError(ctx, 'Phone empty or too short after normalization')
-      return new Response(
-        JSON.stringify({ error: { http_code: 400, message: 'Invalid phone number' } }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      )
-    }
-    const phoneValidation = validatePhone(phone)
-    if (!phoneValidation.valid) {
-      logError(ctx, 'Phone validation failed', { error: phoneValidation.error })
-      return new Response(
-        JSON.stringify({ error: { http_code: 400, message: 'Invalid phone number' } }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Check coverage
-    if (settings.coverage && Array.isArray(settings.coverage) && settings.coverage.length > 0) {
-      const coveragePrefixes = settings.coverage.map((c: unknown) => String(c))
-      const hasRoute = coveragePrefixes.some((prefix: string) => phone.startsWith(prefix))
-      if (!hasRoute) {
-        logError(ctx, 'No coverage for phone country', { phone: phone.slice(0, 3) + '****' })
-        return new Response(
-          JSON.stringify({ error: { http_code: 400, message: 'Phone country not supported' } }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
-        )
-      }
-    }
-
-    message = cleanMessage(message)
-
-    debug(ctx, 'Sending OTP', { phone: phone.slice(0, 3) + '****', language })
-
-    // Send via kwtSMS
+    // Send OTP via unified pipeline
     const senderForMessage = settings.sender_id || 'KWT-SMS'
-    const result = await sendSms(username, password, phone, message, senderForMessage, settings.test_mode)
+    debug(ctx, 'Sending OTP', { phone: data.user.phone.slice(0, 3) + '****', language })
+
+    const resp = await processAndSend({
+      phone: data.user.phone,
+      message,
+      senderId: senderForMessage,
+      username,
+      password,
+      testMode: settings.test_mode,
+      defaultCountryCode: settings.default_country_code,
+      coverage: settings.coverage,
+    })
 
     // Log to sms_queue for audit trail (OTP masked in variables)
     const { error: insertErr } = await supabaseAdmin.from('sms_queue').insert({
       phone: data.user.phone,
-      phone_normalized: phone,
+      phone_normalized: resp.phone,
       template_slug: 'auth_otp',
       variables: { otp: '***' },
-      message,
+      message: resp.message || message,
       language,
       sender_id: senderForMessage,
       recipient_type: 'customer',
-      status: result.result === 'OK' ? 'sent' : 'failed',
-      error_code: result.code || null,
-      error_message: result.description || null,
-      msg_id: result['msg-id'] || null,
-      points_charged: result['points-charged'] || null,
-      balance_after: result['balance-after'] || null,
-      api_response: result,
+      status: resp.ok ? 'sent' : 'failed',
+      error_code: resp.errorCode || (resp.result?.code) || null,
+      error_message: resp.errorMessage || (resp.result?.description) || null,
+      msg_id: resp.result?.['msg-id'] || null,
+      points_charged: resp.result?.['points-charged'] || null,
+      balance_after: resp.result?.['balance-after'] || null,
+      api_response: resp.result || null,
       processed_at: new Date().toISOString(),
     })
 
@@ -181,15 +155,15 @@ Deno.serve(async (req) => {
       logError(ctx, 'Failed to log OTP to queue', { error: insertErr.message })
     }
 
-    if (result.result !== 'OK') {
-      logError(ctx, 'OTP send failed', { code: result.code, description: result.description })
+    if (!resp.ok) {
+      logError(ctx, 'OTP send failed', { errorCode: resp.errorCode, errorMessage: resp.errorMessage })
       return new Response(
-        JSON.stringify({ error: { http_code: 500, message: `kwtSMS error: ${result.code}` } }),
+        JSON.stringify({ error: { http_code: 500, message: 'SMS delivery failed' } }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       )
     }
 
-    log(ctx, 'OTP sent successfully', { msgId: result['msg-id'] })
+    log(ctx, 'OTP sent successfully', { msgId: resp.result?.['msg-id'] })
     return new Response(JSON.stringify({}), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

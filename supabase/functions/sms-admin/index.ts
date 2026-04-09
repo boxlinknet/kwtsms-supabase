@@ -4,9 +4,8 @@
 
 import { supabaseAdmin } from '../_shared/db.ts'
 import { corsHeaders, corsResponse } from '../_shared/cors.ts'
-import { getBalance, getSenderIds, getCoverage, sendSms } from '../_shared/kwtsms-client.ts'
-import { validatePhone, normalizePhone } from '../_shared/normalize.ts'
-import { cleanMessage } from '../_shared/clean.ts'
+import { getBalance, getSenderIds, getCoverage } from '../_shared/kwtsms-client.ts'
+import { processAndSend } from '../_shared/send.ts'
 import { log, error as logError, setDebugLogging } from '../_shared/logger.ts'
 
 function unauthorizedResponse(headers: Record<string, string>): Response {
@@ -293,39 +292,24 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Credentials not configured' }), { status: 400, headers })
       }
 
-      // Normalize and validate phone
-      const normalized = normalizePhone(phone, settings.default_country_code)
-      if (!normalized || normalized.length < 8) {
-        return new Response(JSON.stringify({ error: 'Invalid phone number' }), { status: 400, headers })
-      }
-      const validation = validatePhone(normalized)
-      if (!validation.valid) {
-        return new Response(JSON.stringify({ error: 'Invalid phone number' }), { status: 400, headers })
-      }
+      const resp = await processAndSend({
+        phone,
+        message: message || 'kwtSMS gateway test message',
+        senderId: settings.sender_id || 'KWT-SMS',
+        username: settings.kwtsms_username,
+        password: settings.kwtsms_password,
+        testMode: settings.test_mode,
+        defaultCountryCode: settings.default_country_code,
+        coverage: settings.coverage,
+      })
 
-      // Check coverage
-      if (settings.coverage && Array.isArray(settings.coverage) && settings.coverage.length > 0) {
-        const coveragePrefixes = settings.coverage.map((c: unknown) => String(c))
-        const hasRoute = coveragePrefixes.some((prefix: string) => normalized.startsWith(prefix))
-        if (!hasRoute) {
-          return new Response(JSON.stringify({ error: 'Phone country not supported. Check coverage in your kwtSMS account.' }), { status: 400, headers })
-        }
+      if (resp.ok) {
+        return new Response(JSON.stringify(resp.result), { status: 200, headers })
       }
-
-      const testMessage = cleanMessage(message || 'kwtSMS gateway test message')
-      if (!testMessage) {
-        return new Response(JSON.stringify({ error: 'Message empty after cleaning' }), { status: 400, headers })
+      if (resp.result) {
+        return new Response(JSON.stringify(resp.result), { status: 200, headers })
       }
-      const result = await sendSms(
-        settings.kwtsms_username,
-        settings.kwtsms_password,
-        normalized,
-        testMessage,
-        settings.sender_id || 'KWT-SMS',
-        settings.test_mode
-      )
-
-      return new Response(JSON.stringify(result), { status: 200, headers })
+      return new Response(JSON.stringify({ error: resp.errorMessage }), { status: 400, headers })
     }
 
     // 404 for unknown routes
