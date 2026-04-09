@@ -88,10 +88,9 @@ Deno.serve(async (req) => {
     return handleApiProxy(req, path.slice(4), url.search)
   }
 
-  // Serve the SPA HTML
-  return new Response(HTML, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
-  })
+  // Redirect to dashboard with project URL pre-filled
+  const dashboardUrl = 'https://boxlinknet.github.io/kwtsms-supabase/?project=' + encodeURIComponent(SUPABASE_URL)
+  return Response.redirect(dashboardUrl, 302)
 })
 
 async function handleApiProxy(req: Request, apiPath: string, search: string): Promise<Response> {
