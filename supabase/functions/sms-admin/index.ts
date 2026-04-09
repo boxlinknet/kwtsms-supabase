@@ -6,6 +6,7 @@ import { supabaseAdmin } from '../_shared/db.ts'
 import { corsHeaders, corsResponse } from '../_shared/cors.ts'
 import { getBalance, getSenderIds, getCoverage, sendSms } from '../_shared/kwtsms-client.ts'
 import { validatePhone, normalizePhone } from '../_shared/normalize.ts'
+import { cleanMessage } from '../_shared/clean.ts'
 import { log, error as logError, setDebugLogging } from '../_shared/logger.ts'
 
 function unauthorizedResponse(headers: Record<string, string>): Response {
@@ -311,7 +312,10 @@ Deno.serve(async (req) => {
         }
       }
 
-      const testMessage = message || 'kwtSMS gateway test message'
+      const testMessage = cleanMessage(message || 'kwtSMS gateway test message')
+      if (!testMessage) {
+        return new Response(JSON.stringify({ error: 'Message empty after cleaning' }), { status: 400, headers })
+      }
       const result = await sendSms(
         settings.kwtsms_username,
         settings.kwtsms_password,
