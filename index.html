@@ -421,6 +421,10 @@
   <div id="login-screen">
     <div id="login-box">
       <img src="https://www.kwtsms.com/images/kwtsms_logo_60.png" alt="kwtSMS">
+      <div class="form-group" id="project-url-group">
+        <label>Supabase Project URL</label>
+        <input type="url" id="login-project-url" placeholder="https://xxxx.supabase.co">
+      </div>
       <div class="form-group">
         <label>Email</label>
         <input type="email" id="login-email" placeholder="admin@example.com">
@@ -618,18 +622,26 @@
 
     function ensureApiBase() {
       if (API_BASE) return true;
-      var url = prompt('Enter your Supabase project URL:');
-      if (!url) return false;
-      url = url.replace(/\/+$/, '');
-      sessionStorage.setItem('supabase_url', url);
-      API_BASE = url + '/functions/v1/sms-dashboard/api/';
-      return true;
+      // Read from login form field
+      var urlInput = document.getElementById('login-project-url');
+      if (urlInput) {
+        var url = urlInput.value.trim().replace(/\/+$/, '');
+        if (url) {
+          sessionStorage.setItem('supabase_url', url);
+          API_BASE = url + '/functions/v1/sms-dashboard/api/';
+          return true;
+        }
+      }
+      return false;
     }
 
     async function doLogin() {
-      if (!ensureApiBase()) return;
       var email = document.getElementById('login-email').value.trim();
       var password = document.getElementById('login-password').value;
+      if (!ensureApiBase()) {
+        document.getElementById('login-error').textContent = 'Project URL is required';
+        return;
+      }
       if (!email || !password) return;
       document.getElementById('login-error').textContent = '';
       try {
@@ -1232,6 +1244,15 @@
     // Init
     // Init: check existing session or show login
     document.addEventListener('DOMContentLoaded', function() {
+      // Hide project URL field if served from same Supabase project
+      if (API_BASE) {
+        var urlGroup = document.getElementById('project-url-group');
+        if (urlGroup) urlGroup.style.display = 'none';
+      } else {
+        // Pre-fill from sessionStorage if returning
+        var saved = sessionStorage.getItem('supabase_url');
+        if (saved) document.getElementById('login-project-url').value = saved;
+      }
       if (authToken) { showApp(); }
     });
   </script>
